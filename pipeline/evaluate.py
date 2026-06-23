@@ -20,6 +20,7 @@ def evaluate(model, X_test, y_test) -> dict:
             y_proba = (scores - scores.min()) / (scores.max() - scores.min() + 1e-9)
         else:
             y_proba = y_pred.astype(float)
+    print('hello')
 
     metrics = {
         "accuracy": float(accuracy_score(y_test, y_pred)),
