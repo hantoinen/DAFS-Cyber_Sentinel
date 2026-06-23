@@ -18,10 +18,9 @@ from __future__ import annotations
 
 import pandas as pd
 from sklearn.compose import ColumnTransformer
+from sklearn.preprocessing import OneHotEncoder, StandardScaler, RobustScaler
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 # ── Constantes (à ajuster si le CSV change) ──────────────────────────────────
 TARGET_COL = "class"
@@ -42,79 +41,45 @@ def _get_numeric_cols(X: pd.DataFrame) -> list[str]:
 
 def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
     """
-    Construit le ColumnTransformer adapté au dataset réseau.
-
-    Numériques  → imputation médiane  + StandardScaler
-    Catégoriels → imputation mode     + OneHotEncoder
+    Split into train/test and build a robust preprocessing pipeline.
+    Includes imputation, scaling, and OneHotEncoding via ColumnTransformer.
+    Returns: X_train, X_test, y_train, y_test, preprocessor
     """
-    numeric_cols = _get_numeric_cols(X)
-    cat_cols = [c for c in CATEGORICAL_COLS if c in X.columns]
+    # 1. Séparation de la cible et des features
+    y = df[TARGET].astype(int)
+    X = df.drop(columns=[TARGET])
 
-    numeric_pipeline = Pipeline([
+    # 2. Détection automatique des types de colonnes
+    num_cols = [c for c in X.columns if c not in CATEGORICAL]
+    cat_cols = [c for c in CATEGORICAL if c in X.columns]
+
+    # 3. Création des sous-pipelines pour chaque type de données
+    
+    # Pipeline Numérique : Imputation (médiane) + Normalisation Robuste (anti-outliers)
+    num_pipeline = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="median")),
-        ("scaler", StandardScaler()),
+        ("scaler", RobustScaler(with_centering=False)) # with_centering=False conserve la compatibilité sparse
     ])
 
-    categorical_pipeline = Pipeline([
+    # Pipeline Catégoriel : Imputation (valeur la plus fréquente) + One-Hot Encoding
+    cat_pipeline = Pipeline(steps=[
         ("imputer", SimpleImputer(strategy="most_frequent")),
-        (
-            "onehot",
-            OneHotEncoder(handle_unknown="ignore", sparse_output=False),
-        ),
+        ("onehot", OneHotEncoder(handle_unknown="ignore", sparse_output=True))
     ])
 
-    return ColumnTransformer(
+    # 4. Assemblage global avec ColumnTransformer
+    preproc = ColumnTransformer(
         transformers=[
-            ("num", numeric_pipeline, numeric_cols),
-            ("cat", categorical_pipeline, cat_cols),
+            ("num", num_pipeline, num_cols),
+            ("cat", cat_pipeline, cat_cols),
         ],
-        remainder="drop",   # ignore toute colonne inattendue
+        remainder="drop",
+        sparse_threshold=0.3,
     )
 
-
-def preprocess(df: pd.DataFrame):
-    """
-    Nettoie, sépare et prépare le dataset pour l'entraînement.
-
-    Retourne
-    --------
-    X_train, X_test : pd.DataFrame  — features brutes (non transformées)
-    y_train, y_test : pd.Series     — cible binaire 0/1
-    preproc         : ColumnTransformer non entraîné
-    """
-    df = df.copy()
-
-    # 1. Supprimer les colonnes inutiles
-    cols_to_drop = [c for c in DROP_COLS if c in df.columns]
-    if cols_to_drop:
-        df = df.drop(columns=cols_to_drop)
-
-    # 2. Vérifications de base
-    if TARGET_COL not in df.columns:
-        raise KeyError(
-            f"Colonne cible '{TARGET_COL}' absente. "
-            f"Colonnes disponibles : {list(df.columns)}"
-        )
-    missing_cats = [c for c in CATEGORICAL_COLS if c not in df.columns]
-    if missing_cats:
-        raise ValueError(f"Colonnes catégorielles manquantes : {missing_cats}")
-
-    # 3. Supprimer les lignes sans cible
-    df = df.dropna(subset=[TARGET_COL])
-
-    # 4. Séparer features / cible
-    X = df.drop(columns=[TARGET_COL])
-    y = df[TARGET_COL].astype(int)
-
-    # 5. Split train / test (stratifié → garde le ratio normal/anomaly)
+    # 5. Split Train/Test avec stratification pour respecter la distribution des classes
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=TEST_SIZE,
-        random_state=RANDOM_STATE,
-        stratify=y,
+        X, y, test_size=0.25, random_state=42, stratify=y
     )
-
-    # 6. Préprocesseur (non entraîné — sera fit dans train_model)
-    preproc = build_preprocessor(X_train)
 
     return X_train, X_test, y_train, y_test, preproc
