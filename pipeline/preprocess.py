@@ -1,15 +1,45 @@
+"""
+pipeline/preprocess.py
+
+Responsable : preprocessing
+Dataset     : Intrusion Detection (KDD-style)
+              colonnes catégorielles : protocol_type, service, flag
+              cible                  : class (0 = normal, 1 = anomaly)
+
+Contrat imposé par main.py — NE PAS changer la signature :
+    preprocess(df) -> (X_train, X_test, y_train, y_test, preproc)
+
+Note : preproc est renvoyé NON entraîné.
+       C'est train_model qui fait pipe.fit(X_train, y_train).
+       → Pas de data leakage du test vers le train.
+"""
+
+from __future__ import annotations
+
 import pandas as pd
-from typing import Tuple
-from sklearn.model_selection import train_test_split
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder, StandardScaler, RobustScaler
 from sklearn.impute import SimpleImputer
 from sklearn.pipeline import Pipeline
 
-CATEGORICAL = ["protocol_type", "service", "flag"]
-TARGET = "class"
+# ── Constantes (à ajuster si le CSV change) ──────────────────────────────────
+TARGET_COL = "class"
+CATEGORICAL_COLS = ["protocol_type", "service", "flag"]
+DROP_COLS: list[str] = []   # ex. colonnes id ou fuite de données
+TEST_SIZE = 0.2
+RANDOM_STATE = 42
+# ─────────────────────────────────────────────────────────────────────────────
 
-def preprocess(df: pd.DataFrame) -> Tuple:
+
+def _get_numeric_cols(X: pd.DataFrame) -> list[str]:
+    """Toutes les colonnes numériques (hors catégorielles déjà listées)."""
+    return [
+        c for c in X.select_dtypes(include="number").columns
+        if c not in CATEGORICAL_COLS
+    ]
+
+
+def build_preprocessor(X: pd.DataFrame) -> ColumnTransformer:
     """
     Split into train/test and build a robust preprocessing pipeline.
     Includes imputation, scaling, and OneHotEncoding via ColumnTransformer.
